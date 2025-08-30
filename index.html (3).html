@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>礼花动画</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+        .scrolling-text-container {
+            position: fixed;
+            top: 10px;
+            left: 0;
+            width: 100%;
+            overflow: hidden;
+            white-space: nowrap;
+            z-index: 10;
+        }
+        .scrolling-text {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+            display: inline-block;
+            animation: scroll 30s linear infinite;
+        }
+        .red-heart { color: #ff0000; margin: 0 10px; }
+        .title-container {
+            position: fixed;
+            top: 42%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+            width: 92%;
+        }
+        .main-title {
+            font-family: "楷体", "KaiTi", serif;
+            font-size: 45px;
+            color: #fff;
+            margin: 0 0 10px 0;
+            text-shadow: 0 0 10px rgba(255,255,255,0.8);
+        }
+        .sub-title {
+            font-family: "楷体", "KaiTi", serif;
+            font-size: 24px;
+            color: #fff;
+            margin: 0 0 80px 0;
+            text-shadow: 0 0 10px rgba(255,255,255,0.8);
+        }
+        .red-year { color: #ff0000; }
+        .click-instruction {
+            font-size: 18px;
+            color: #fff;
+            margin: 10px 0;
+            opacity: 0.8;
+        }
+        .audio-status {
+            display: none;
+        }
+        @keyframes scroll {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
+        }
+        @media screen and (max-width: 428px) {
+            .main-title { font-size: 32px; }
+            .sub-title { font-size: 20px; margin: 0 0 60px 0; }
+            .click-instruction { font-size: 16px; }
+            .scrolling-text { font-size: 20px; animation: scroll 25s linear infinite; }
+            .red-heart { margin: 0 5px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="title-container">
+        <div class="main-title">双节快乐，阖家幸福！</div>
+        <div class="sub-title"><span class="red-year">2025.</span>周鑑青敬祝</div>
+        <div class="click-instruction">请点击下方"激活声音"按钮，再点击屏幕释放礼花</div>
+        <button id="activateAudio" style="padding: 10px 20px; font-size: 18px; background: #ff0000; color: white; border: none; border-radius: 5px; cursor: pointer;">
+            激活声音
+        </button>
+    </div>
+
+    <div class="scrolling-text-container">
+        <div class="scrolling-text">
+            祝双节愉快<span class="red-heart">♥</span>身体康健<span class="red-heart">♥</span>阖家团圆<span class="red-heart">♥</span>天天开心<span class="red-heart">♥</span>万事如意<span class="red-heart">♥</span>平安喜乐<span class="red-heart">♥</span>心想事成<span class="red-heart">♥</span>福寿绵长<span class="red-heart">♥</span>
+            祝双节愉快<span class="red-heart">♥</span>身体康健<span class="red-heart">♥</span>阖家团圆<span class="red-heart">♥</span>天天开心<span class="red-heart">♥</span>万事如意<span class="red-heart">♥</span>平安喜乐<span class="red-heart">♥</span>心想事成<span class="red-heart">♥</span>福寿绵长<span class="red-heart">♥</span>
+        </div>
+    </div>
+
+    <div class="audio-status" id="audioStatus">
+        请先点击"激活声音"按钮
+    </div>
+
+    <canvas id="fireworksCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('fireworksCanvas');
+        const ctx = canvas.getContext('2d');
+        const activateButton = document.getElementById('activateAudio');
+        const audioStatus = document.getElementById('audioStatus');
+        let fireworks = [];
+        let isAutoPhase = true;
+        let autoPhaseEndTime = Date.now() + 5000;
+        let audioContext = null;
+        let audioActivated = false;
+        let explosionBuffer = null;
+        let whistleBuffer = null;
+
+        // 初始化音频系统 - 增强激活反馈
+        function initAudio() {
+            try {
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioContext();
+                
+                generateExplosionSound();
+                generateWhistleSound();
+                
+                // 播放明显的确认音，确保用户知道声音已激活
+                const testOsc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                gain.gain.value = 2.0; // 非常明显的确认音
+                testOsc.type = "sine";
+                testOsc.frequency.value = 1000;
+                testOsc.connect(gain);
+                gain.connect(audioContext.destination);
+                testOsc.start();
+                testOsc.stop(audioContext.currentTime + 0.5);
+                
+                audioActivated = true;
+                activateButton.disabled = true;
+                activateButton.textContent = "声音已激活";
+                activateButton.style.background = "#4CAF50";
+                
+                console.log("音频系统激活成功");
+            } catch (e) {
+                console.error("音频激活失败:", e);
+                audioContext = null;
+            }
+        }
+
+        // 爆炸声 - 最大化设计，移除所有限制
+        function generateExplosionSound() {
+            if (!audioContext) return;
+
+            const sampleRate = audioContext.sampleRate;
+            const duration = 1.0; // 短促而强烈的爆炸
+            const frameCount = sampleRate * duration;
+            
+            explosionBuffer = audioContext.createBuffer(1, frameCount, sampleRate);
+            const channelData = explosionBuffer.getChannelData(0);
+
+            for (let i = 0; i < frameCount; i++) {
+                const time = i / sampleRate;
+                
+                // 最大化振幅，强化低频冲击力
+                const mainBoom = Math.sin(time * 40) * Math.exp(-time * 2.0) * 10.0; // 极高振幅
+                const secondBoom = time > 0.2 ? Math.sin((time - 0.2) * 25) * Math.exp(-(time - 0.2) * 1.5) * 9.0 : 0;
+                const bass = Math.sin(time * 10) * Math.exp(-time * 1.0) * 8.0; // 增强低频成分
+                
+                const total = (mainBoom + secondBoom + bass) * 0.95;
+                channelData[i] = Math.max(-1, Math.min(1, total)); // 仅做必要的限幅防止完全失真
+            }
+        }
+
+        // 啸叫声保持不变，避免干扰爆炸声
+        function generateWhistleSound() {
+            if (!audioContext) return;
+
+            const sampleRate = audioContext.sampleRate;
+            const duration = 1.2;
+            const frameCount = sampleRate * duration;
+            
+            whistleBuffer = audioContext.createBuffer(1, frameCount, sampleRate);
+            const channelData = whistleBuffer.getChannelData(0);
+
+            for (let i = 0; i < frameCount; i++) {
+                const time = i / sampleRate;
+                
+                const frequency = 1600 - 1200 * (time / duration);
+                const amplitude = 0.3 * Math.sin(time * Math.PI / duration);
+                
+                const noise = (Math.random() * 2 - 1) * 0.05;
+                channelData[i] = (Math.sin(2 * Math.PI * frequency * time) * amplitude) + noise;
+            }
+        }
+
+        // 播放爆炸声 - 无限制模式
+        function playExplosionSound() {
+            if (!audioContext || !explosionBuffer || !audioActivated) {
+                console.log("爆炸声播放条件不满足");
+                return;
+            }
+
+            const playSound = () => {
+                try {
+                    const source = audioContext.createBufferSource();
+                    source.buffer = explosionBuffer;
+                    
+                    // 移除压缩器，最大化音量输出
+                    const gainNode = audioContext.createGain();
+                    gainNode.gain.value = 50.0; // 极高增益值
+                    
+                    // 瞬间达到最大音量
+                    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                    gainNode.gain.linearRampToValueAtTime(50.0, audioContext.currentTime + 0.001);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + explosionBuffer.duration);
+                    
+                    // 直接连接到输出，无压缩
+                    source.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    source.start(0);
+                } catch (e) {
+                    console.error("爆炸声播放失败:", e);
+                }
+            };
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume()
+                    .then(playSound)
+                    .catch(e => {
+                        console.error("恢复音频上下文失败:", e);
+                        setTimeout(() => {
+                            audioContext.resume().then(playSound).catch(e => console.error("二次恢复失败:", e));
+                        }, 100);
+                    });
+            } else {
+                playSound();
+            }
+        }
+
+        // 播放升空啸叫声
+        function playWhistleSound() {
+            if (!audioContext || !whistleBuffer || !audioActivated) return;
+
+            try {
+                const source = audioContext.createBufferSource();
+                source.buffer = whistleBuffer;
+                
+                const gainNode = audioContext.createGain();
+                gainNode.gain.value = 0.8;
+                
+                source.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume().then(() => source.start(0));
+                } else {
+                    source.start(0);
+                }
+                
+                return source;
+            } catch (e) {
+                console.error("口哨声播放失败:", e);
+                return null;
+            }
+        }
+
+        // 以下代码保持不变
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        function random(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        const blessings = [
+            "双节快乐", "阖家团圆", "身体健康", 
+            "万事如意", "平安喜乐", "心想事成",
+            "福寿绵长", "幸福美满", "笑口常开",
+            "吉祥如意", "前程似锦", "年年有余"
+        ];
+
+        function drawMoon() {
+            const baseSize = Math.min(canvas.width, canvas.height);
+            const moonRadius = baseSize * 0.07;
+            const moonX = canvas.width - moonRadius * 2;
+            const moonY = moonRadius * 3;
+            
+            ctx.beginPath();
+            ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(moonX - moonRadius * 0.2, moonY - moonRadius * 0.2, moonRadius * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = '#f0f0e0';
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(moonX, moonY, moonRadius * 1.2, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.fill();
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.radius = random(1, 3);
+                this.velocity = {x: random(-5, 5), y: random(-5, 5)};
+                this.gravity = 0.05;
+                this.friction = 0.98;
+                this.alpha = 1;
+            }
+
+            update() {
+                this.velocity.x *= this.friction;
+                this.velocity.y *= this.friction;
+                this.velocity.y += this.gravity;
+                this.x += this.velocity.x;
+                this.y += this.velocity.y;
+                this.alpha -= 0.01;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class BlessingText {
+            constructor(x, y, text, color) {
+                this.x = x;
+                this.y = y;
+                this.text = text;
+                this.color = color;
+                this.velocity = {x: random(-1, 1), y: random(-2, -1)};
+                this.gravity = 0.02;
+                this.friction = 0.99;
+                this.alpha = 1;
+                this.fontSize = window.innerWidth > 428 ? random(16, 24) : random(14, 20);
+                this.rotation = random(-0.1, 0.1);
+                this.rotationSpeed = random(-0.01, 0.01);
+            }
+
+            update() {
+                this.velocity.x *= this.friction;
+                this.velocity.y *= this.friction;
+                this.velocity.y += this.gravity;
+                this.x += this.velocity.x;
+                this.y += this.velocity.y;
+                this.alpha -= 0.008;
+                this.rotation += this.rotationSpeed;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                ctx.font = `${this.fontSize}px "楷体", "KaiTi", serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                ctx.fillText(this.text, 0, 0);
+                ctx.restore();
+            }
+        }
+
+        class Firework {
+            constructor(x, y) {
+                const isMobile = window.innerWidth <= 428;
+                
+                if (x !== undefined && y !== undefined) {
+                    this.x = random(0, canvas.width);
+                    this.y = canvas.height;
+                    this.targetX = x;
+                    this.targetY = y;
+                } else {
+                    this.x = random(0, canvas.width);
+                    this.y = canvas.height;
+                    this.targetY = isMobile 
+                        ? random(canvas.height * 0.3, canvas.height * 0.6)
+                        : random(canvas.height * 0.2, canvas.height * 0.6);
+                    this.targetX = random(0, canvas.width);
+                }
+                
+                const distance = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+                this.velocity = {
+                    x: (this.targetX - this.x) / distance * 5,
+                    y: (this.targetY - this.y) / distance * 5
+                };
+                this.radius = 2;
+                this.color = `hsl(${random(0, 360)}, 100%, 50%)`;
+                this.exploded = false;
+                this.particles = [];
+                this.blessings = [];
+                this.whistlePlayed = false;
+                this.whistleSource = null;
+            }
+
+            update() {
+                if (!this.exploded) {
+                    this.x += this.velocity.x;
+                    this.y += this.velocity.y;
+                    
+                    const startY = canvas.height;
+                    const distanceTraveled = startY - this.y;
+                    const totalDistance = startY - this.targetY;
+                    
+                    if (!this.whistlePlayed && totalDistance > 0 && distanceTraveled / totalDistance > 0.1) {
+                        this.whistleSource = playWhistleSound();
+                        this.whistlePlayed = true;
+                    }
+                    
+                    const distanceToTarget = Math.hypot(this.targetX - this.x, this.targetY - this.y);
+                    if (distanceToTarget < 5) {
+                        if (this.whistleSource) {
+                            this.whistleSource.stop();
+                        }
+                        this.explode();
+                    }
+                } else {
+                    for (let i = this.particles.length - 1; i >= 0; i--) {
+                        this.particles[i].update();
+                        if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
+                    }
+                    
+                    for (let i = this.blessings.length - 1; i >= 0; i--) {
+                        this.blessings[i].update();
+                        if (this.blessings[i].alpha <= 0) this.blessings.splice(i, 1);
+                    }
+                }
+            }
+
+            explode() {
+                this.exploded = true;
+                const particleCount = Math.floor(random(100, 200));
+                for (let i = 0; i < particleCount; i++) {
+                    this.particles.push(new Particle(this.x, this.y, this.color));
+                }
+                
+                const blessingCount = Math.floor(random(2, 5));
+                const usedIndices = new Set();
+                for (let i = 0; i < blessingCount; i++) {
+                    let randomIndex;
+                    do {
+                        randomIndex = Math.floor(random(0, blessings.length));
+                    } while (usedIndices.has(randomIndex));
+                    
+                    usedIndices.add(randomIndex);
+                    const offsetX = random(-50, 50);
+                    const offsetY = random(-50, 50);
+                    
+                    this.blessings.push(new BlessingText(
+                        this.x + offsetX, this.y + offsetY, 
+                        blessings[randomIndex], this.color
+                    ));
+                }
+
+                playExplosionSound();
+            }
+
+            draw() {
+                if (!this.exploded) {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = this.color;
+                    ctx.fill();
+                } else {
+                    this.particles.forEach(particle => particle.draw());
+                    this.blessings.forEach(blessing => blessing.draw());
+                }
+            }
+        }
+
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            drawMoon();
+
+            if (isAutoPhase) {
+                if (Math.random() < 0.04) {
+                    fireworks.push(new Firework());
+                }
+                
+                if (Date.now() > autoPhaseEndTime) {
+                    isAutoPhase = false;
+                }
+            }
+
+            for (let i = fireworks.length - 1; i >= 0; i--) {
+                fireworks[i].update();
+                fireworks[i].draw();
+
+                if (fireworks[i].exploded && fireworks[i].particles.length === 0 && fireworks[i].blessings.length === 0) {
+                    fireworks.splice(i, 1);
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        activateButton.addEventListener('click', initAudio);
+
+        document.body.addEventListener('click', (e) => {
+            if (audioActivated) {
+                fireworks.push(new Firework(e.clientX, e.clientY));
+            }
+        });
+
+        document.body.addEventListener('touchstart', (e) => {
+            if (audioActivated) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                fireworks.push(new Firework(touch.clientX, touch.clientY));
+            }
+        }, { passive: false });
+
+        animate();
+    </script>
+</body>
+</html>
+    
